@@ -6,7 +6,7 @@ DIR=$1
 
 cp -r $DIR $DIR"_"$PREFIX
 
-for f in "$DIR""_""$PREFIX"/*/*; do
+for f in "$DIR""_""$PREFIX"/*/*/*; do
   if [ -d "$f" ]; then
     for file in "$f"/*.wav; do
       (

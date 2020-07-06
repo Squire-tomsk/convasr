@@ -31,7 +31,7 @@ TRANSCRIPT_PREPROC='--skip-transcript-large-than-char 45000 --split-by-parts 3 -
 #head -n $SAMPLE $DATASET_ROOT/youtube.txt > $DATASET_AUDIO/audio.txt # list of links like http://youtu.be/e8bkFQD3ZhA
 #bash datasets/youtube.sh RETR $DATASET_AUDIO/audio.txt $DATASET_AUDIO
 
-#python3 datasets/youtube.py -i $DATASET_AUDIO -o $DATASET_AUDIO.json $TRANSCRIPT_PREPROC
+python3 datasets/youtube.py -i $DATASET_AUDIO -o $DATASET_AUDIO.json $TRANSCRIPT_PREPROC
 
 python3 transcribe.py --checkpoint $CHECKPOINT -i $DATASET_AUDIO.json -o $DATASET_TRANSCRIBE $TRANSCRIBE
 
