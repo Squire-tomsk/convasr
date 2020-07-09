@@ -262,6 +262,27 @@ def split(input_path, output_path, test_duration_in_hours, val_duration_in_hours
 	json.dump(transcripts_train, open(os.path.join(output_path, os.path.basename(output_path) + '_train.json'), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
 
 
+def copy_dataset(dataset_path, new_dir):
+	from shutil import copyfile
+
+	print(dataset_path)
+	print(new_dir)
+
+	dataset = json.load(open(dataset_path))
+
+	for transctipt in tqdm.tqdm(dataset):
+		src = transctipt['audio_path']
+		dst = '/'.join([new_dir] + transctipt['audio_path'].split('/')[1:])
+		transctipt['audio_path'] = dst
+
+		os.makedirs('/'.join(dst.split('/')[:-1]), exist_ok=True)
+
+		copyfile(src, dst)
+
+	os.makedirs('/'.join([new_dir] + dataset_path.split('/')[1:-1]), exist_ok=True)
+	json.dump(dataset, open('/'.join([new_dir] + dataset_path.split('/')[1:]), 'w'), ensure_ascii = False, sort_keys = True, indent = 2)
+
+
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	subparsers = parser.add_subparsers()
@@ -360,6 +381,11 @@ if __name__ == '__main__':
 	cmd.add_argument('--val-duration-in-hours', required = True, type = float)
 	cmd.add_argument('--microval-duration-in-hours', required = True, type = float)
 	cmd.set_defaults(func = split)
+
+	cmd = subparsers.add_parser('copy')
+	cmd.add_argument('--dataset-path', required = True, type=str)
+	cmd.add_argument('--new-dir', type=str)
+	cmd.set_defaults(func = copy_dataset)
 
 	args = vars(parser.parse_args())
 	func = args.pop('func')

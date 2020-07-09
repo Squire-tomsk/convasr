@@ -1,5 +1,6 @@
 #!/bin/bash
 
+BITRATE=$2
 DIR=$1
 
 for f in "$DIR"/*/*/*; do
@@ -8,10 +9,10 @@ for f in "$DIR"/*/*/*; do
       (
       sourcefile=$file
       filename="${file%.*}"
-      destfile="$filename.gsm"
+      destfile="$filename.amr"
 
       echo $sourcefile;
-      ffmpeg -loglevel panic -y -i $sourcefile -c:a libgsm -vn -ar 8000 -ac 1 -ab 13000 -f gsm $destfile
+      ffmpeg -loglevel panic -y -i $sourcefile -vn -ar 8000 -ac 1 -b:a $BITRATE -acodec g726 $destfile
       ffmpeg -loglevel panic -y -i $destfile -loglevel error -v quiet -acodec pcm_s16le -ar 8000 -ac 1 $sourcefile
       rm $destfile
       ) &
@@ -19,6 +20,5 @@ for f in "$DIR"/*/*/*; do
     wait
   fi
 done
-
 
 

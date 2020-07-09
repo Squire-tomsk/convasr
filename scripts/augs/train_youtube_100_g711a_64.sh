@@ -13,6 +13,5 @@ python3 train.py $@ \
   --fp16 O2 \
   --experiment-name g711a_64 \
   --skip-on-epoch-end-evaluation \
-  --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-2_wd1e-3_bs256____exp_youtube_100h/checkpoint_epoch89_iter0035000.pt \
+  --checkpoint data/experiments/JasperNetBig_NovoGrad_lr1e-3_wd1e-3_bs256____g711a_64/checkpoint_epoch92_iter0036000.pt \
   --epochs 305 --exphtml= #\
-
