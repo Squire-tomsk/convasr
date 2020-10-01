@@ -23,7 +23,6 @@ import onnxruntime
 import apex
 import datasets
 import decoders
-#import exphtml
 import metrics
 import models
 import optimizers
@@ -209,9 +208,9 @@ def evaluate_model(
 			# TODO: don't forget to fix aligned hyp & ref output!
 			# hyp = new_transcript['alignment']['hyp'] if analyze else new_transcript['hyp']
 			# ref = new_transcript['alignment']['ref'] if analyze else new_transcript['ref']
-			_print('REF: {labels_name} "{ref}"'.format(**t))
-			_print('HYP: {labels_name} "{hyp}"'.format(**t))
-			_print('WER: {labels_name} {wer:.02%} | CER: {cer:.02%}\n'.format(**t))
+			_print('{labels_name} REF: "{ref}"'.format(**t))
+			_print('{labels_name} HYP: "{hyp}"'.format(**t))
+			_print('{labels_name} WER: {wer:.02%} | CER: {cer:.02%}\n'.format(**t))
 
 		transcripts_path = os.path.join(
 			args.experiment_dir,
@@ -222,24 +221,21 @@ def evaluate_model(
 		)
 		for i, label in enumerate(labels):
 			transcript_by_label = transcript[i:: len(labels)]
-			aggregated = error_analyzer.aggregate(transcript_by_label)
+			aggregated = error_analyzer.aggregate(transcript_by_label, sep = '__', defaults = dict(words_easy_errors_easy__cer_pseudo = -1, mer_wordwise = -1, hyp_vocabness = -1, ref_vocabness = -1))
 			if analyze:
 				with open(f'{transcripts_path}.errors.csv', 'w') as f:
 					f.writelines('{hyp},{ref},{error_tag}\n'.format(**w) for w in aggregated['errors']['words'])
 
 			_print('errors', aggregated['errors']['distribution'])
-			cer = torch.FloatTensor([r['cer'] for r in transcript_by_label])
-			loss = torch.FloatTensor([r['loss'] for r in transcript_by_label])
-			_print('cer', metrics.quantiles(cer))
-			_print('loss', metrics.quantiles(loss))
+			_print('cer', metrics.quantiles(t['cer'] for t in transcript_by_label))
+			_print('loss', metrics.quantiles(t['loss'] for t in transcript_by_label))
 			_print(
 				f'{args.experiment_id} {val_dataset_name} {label.name}',
 				f'| epoch {epoch} iter {iteration}' if training else '',
 				f'| {transcripts_path} |',
-				('Entropy: {entropy:.02f} Loss: {loss:.02f} | WER:  {wer:.02%} CER: {cer:.02%} [{words_easy_errors_easy__cer_pseudo:.02%}],  MER: {mer_wordwise:.02%} DER: {hyp_der:.02%}/{ref_der:.02%}\n')
+				('Entropy: {entropy:.02f} Loss: {loss:.02f} | WER:  {wer:.02%} CER: {cer:.02%} [{words_easy_errors_easy__cer_pseudo:.02%}],  MER: {mer_wordwise:.02%} V: {hyp_vocabness:.02%}/{ref_vocabness:.02%}\n')
 				.format(**aggregated)
 			)
-			#columns[val_dataset_name + '_' + labels_name] = {'cer' : aggregated['cer_avg'], '.wer' : aggregated['wer_avg'], '.loss' : aggregated['loss_avg'], '.entropy' : aggregated['entropy_avg'], '.cer_easy' : aggregated['cer_easy_avg'], '.cer_hard':  aggregated['cer_hard_avg'], '.cer_missing' : aggregated['cer_missing_avg'], 'E' : dict(value = aggregated['errors_distribution']), 'L' : dict(value = vis.histc_vega(loss, min = 0, max = 3, bins = 20), type = 'vega'), 'C' : dict(value = vis.histc_vega(cer, min = 0, max = 1, bins = 20), type = 'vega'), 'T' : dict(value = [('audio_name', 'cer', 'mer', 'alignment')] + [(r['audio_name'], r['cer'], r['mer'], vis.word_alignment(r['words'])) for r in sorted(r_, key = lambda r: r['mer'], reverse = True)] if analyze else [], type = 'table')}
 			
 			if training:
 				perf.update(dict(
@@ -283,10 +279,6 @@ def evaluate_model(
 	checkpoint_path = os.path.join(
 		args.experiment_dir, args.checkpoint_format.format(epoch = epoch, iteration = iteration)
 	) if training and not args.checkpoint_skip else None
-	#if args.exphtml:
-	#	columns['checkpoint_path'] = checkpoint_path
-	#	exphtml.expjson(args.exphtml, args.experiment_id, epoch = epoch, iteration = iteration, meta = vars(args), columns = columns, tag = 'train' if training else 'test', git_http = args.githttp)
-	#	exphtml.exphtml(args.exphtml)
 
 	if training and not args.checkpoint_skip:
 		torch.save(
@@ -396,7 +388,7 @@ def main(args):
 		**(dict(inplace = False, dict = lambda logits, log_probs, olen, **kwargs: logits[0]) if args.onnx else {})
 	)
 
-	_print(' Model capacity:', int(models.compute_capacity(model, scale = 1e6)), 'million parameters\n')
+	_print('Model capacity:', int(models.compute_capacity(model, scale = 1e6)), 'million parameters\n')
 
 	if checkpoint:
 		model.load_state_dict(checkpoint['model_state_dict'], strict = False)

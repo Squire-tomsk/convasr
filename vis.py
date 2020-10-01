@@ -26,14 +26,14 @@ import models
 import ctc
 import transcripts
 
-def speaker_barcode(transcript, begin, end, colors = ['gray', 'red', 'blue']):
+def speaker_barcode(transcript, begin, end, colors = ['gray', 'red', 'blue'], left_margin = 0, right_margin = 1):#left_margin = 0.098, right_margin = 0.93):
 	plt.figure(figsize = (8, 0.2))
 	plt.xlim(begin, end)
 	plt.yticks([])
 	plt.axis('off')
 	for t in transcript:
 		plt.axvspan(t['begin'], t['end'], color = colors[t.get('speaker', 0)])
-	plt.subplots_adjust(left = 0, right = 1, bottom = 0, top = 1)
+	plt.subplots_adjust(left = left_margin, right = right_margin, bottom = 0, top = 1)
 	buf = io.BytesIO()
 	plt.savefig(buf, format = 'jpg', dpi = 150, facecolor = colors[0])
 	plt.close()
@@ -372,7 +372,9 @@ def errors(
 		else:
 			filter_transcripts = lambda cat: cat
 
-	cat = filter_transcripts([[a] + list(filter(None, [t.get(a['audio_name'], None) for t in theirs])) for a in ours])[slice(topk)]
+	cat = filter_transcripts([[a] + list(filter(None, [t.get(a['audio_name'], None)
+														for t in theirs]))
+								for a in ours])[slice(topk)]
 	cat_by_labels = collections.defaultdict(list)
 	for c in cat:
 		transcripts_by_labels = collections.defaultdict(list)
