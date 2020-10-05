@@ -252,7 +252,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 					channel = channel,
 					begin_samples = int(t['begin'] * sample_rate) if t['begin'] != self.time_missing else 0,
 					end_samples = 1 + int(t['end'] * sample_rate) if t['end'] != self.time_missing else signal.shape[1],
-
+					
 					speaker = t['speaker']
 				)
 				for t in sorted(transcript, key = transcripts.sort_key)
@@ -261,16 +261,23 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			speaker = torch.LongTensor([t.pop('speaker') for t in transcript]).unsqueeze(-1)
 			normalize_text = True
 
-		features = [
-			self.frontend(segment.unsqueeze(0), waveform_transform_debug = waveform_transform_debug)
-			if self.frontend is not None else segment.unsqueeze(0)
-			for t in transcript
-			for segment in [signal[t.pop('channel'), t.pop('begin_samples'):t.pop('end_samples')]]
-		]
+		features = []
+		for t in transcript:
+			channel = t.pop('channel')
+			time_slice = slice(t.pop('begin_samples'), t.pop('end_samples')) # pop is required independent of segmented
+			if self.segmented:
+				segment = signal[None, channel, time_slice]
+			else:
+				segment = signal[None, channel, :] # begin, end meta could be corrupted, thats why we dont use it here
+			if self.frontend is not None:
+				features.append(self.frontend(segment, waveform_transform_debug = waveform_transform_debug))
+			else:
+				features.append(segment)
+
 		targets = [[labels.encode(t['ref'], normalize = normalize_text)[1]
 					for t in transcript]
 					for labels in self.labels]
-
+		
 		# not batch mode
 		if not self.segmented:
 			transcript, speaker, features = transcript[0], speaker[0], features[0][0]
@@ -567,6 +574,8 @@ class Labels:
 			text = ''.join(c if i == 0 or c != self.repeat else text[i - 1] for i, c in enumerate(text))
 		if collapse_repeat:
 			text = ''.join(c if i == 0 or c != text[i - 1] else '' for i, c in enumerate(text))
+		if phonetic_replace_groups:
+			text = text.translate({ord(c) : g[0] for g in phonetic_replace_groups for c in g})
 		return text
 
 	def __getitem__(self, idx):
