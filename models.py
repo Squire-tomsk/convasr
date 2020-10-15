@@ -3,12 +3,14 @@ import math
 import collections
 import functools
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 import apex
 import librosa
 import shaping
 import typing
+
 
 class InputOutputTypeCast(nn.Module):
 	def __init__(self, model, dtype):
@@ -517,12 +519,14 @@ class LogFilterBankFrontend(nn.Module):
 		preemphasis = 0.97,
 		eps = torch.finfo(torch.float16).tiny,
 		normalize_signal = True,
+		debug_short_long_records_normalize_signal_multiplier = 1.0,
 		stft_mode = None,
 		window_periodic = True,
 		normalize_features = False,
 		**kwargs
 	):
 		super().__init__()
+		self.debug_short_long_records_normalize_signal_multiplier = debug_short_long_records_normalize_signal_multiplier
 		self.stft_mode = stft_mode
 		self.dither = dither
 		self.dither0 = dither0
@@ -561,11 +565,12 @@ class LogFilterBankFrontend(nn.Module):
 		else:
 			self.stft = None
 
-	def forward(self, signal: shaping.BT, mask: shaping.BT = None) -> shaping.BCT:
+	def forward(self, signal: shaping.BT, mask: shaping.BT = None, **kwargs) -> shaping.BCT:
 		assert signal.ndim == 2
 
 		signal = signal if signal.is_floating_point() else signal.to(torch.float32)
-		signal = normalize_signal(signal) if self.normalize_signal else signal
+
+		signal = normalize_signal(signal, denom_multiplier=self.debug_short_long_records_normalize_signal_multiplier) if self.normalize_signal else signal
 		signal = apply_dither(signal, self.dither0)
 		signal = torch.cat([signal[..., :1], signal[..., 1:] -
 							self.preemphasis * signal[..., :-1]], dim = -1) if self.preemphasis > 0 else signal
@@ -638,10 +643,9 @@ def margin(log_probs, dim = 1):
 def compute_capacity(model, scale = 1):
 	return sum(map(torch.numel, model.parameters())) / scale
 
-
-def normalize_signal(signal, dim = -1, eps = 1e-5):
-	return signal / (signal.abs().max(dim = dim, keepdim = True).values + eps) if signal.numel() > 0 else signal
-
+def normalize_signal(signal, dim = -1, eps = 1e-5, denom_multiplier  = 1.0):
+	signal_max = signal.abs().max(dim = dim, keepdim = True).values + eps
+	return signal / (signal_max * denom_multiplier) if signal.numel() > 0 else signal
 
 class MaskedInstanceNorm1d(nn.InstanceNorm1d):
 	def __init__(self, *args, temporal_mask = False, legacy = True, **kwargs):
@@ -700,6 +704,14 @@ def data_parallel_and_autocast(model, optimizer = None, data_parallel = True, op
 	return model, optimizer
 
 
+def distributed_data_parallel_and_autocast(model, local_rank, optimizer = None, opt_level = None, synchronize_bn = False, **kwargs):
+	if synchronize_bn:
+		model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
+	model, optimizer = apex.amp.initialize(model, optimizer, opt_level=opt_level, **kwargs)
+	model = torch.nn.parallel.DistributedDataParallel(model, device_ids = [local_rank], output_device = local_rank, find_unused_parameters = True)
+	return model, optimizer
+
+
 def silence_space_mask(log_probs, speech, blank_idx, space_idx, kernel_size = 101):
 	# major dilation
 	greedy_decoded = log_probs.max(dim = 1).indices
@@ -710,7 +722,12 @@ def silence_space_mask(log_probs, speech, blank_idx, space_idx, kernel_size = 10
 
 
 def rle1d(tensor):
-	starts = torch.cat(( torch.LongTensor([0], device = tensor.device), (tensor[1:] != tensor[:-1]).nonzero(as_tuple = False).add_(1).squeeze(1), torch.LongTensor([tensor.shape[-1]], device = tensor.device) ))
+	#_notspeech_ = ~F.pad(speech, [1, 1])
+	#channel_i_channel_j = torch.cat([(speech & _notspeech_[..., :-2]).nonzero(), (speech & _notspeech_[..., 2:]).nonzero()], dim = -1)
+	#return [dict(begin = i / sample_rate, end = j / sample_rate, channel = channel) for channel, i, _, j in channel_i_channel_j.tolist()]
+	
+	assert tensor.ndim == 1
+	starts = torch.cat(( torch.tensor([0], dtype = torch.long, device = tensor.device), (tensor[1:] != tensor[:-1]).nonzero(as_tuple = False).add_(1).squeeze(1), torch.tensor([tensor.shape[-1]], dtype = torch.long, device = tensor.device)))
 	starts, lengths, values = starts[:-1], (starts[1:] - starts[:-1]), tensor[starts[:-1]]
 	return starts, lengths, values
 
@@ -740,7 +757,7 @@ def sparse_topk_todense(saved, device = None):
 
 
 def master_module(model):
-	return model.module if isinstance(model, nn.DataParallel) else model
+	return model.module if isinstance(model, (torch.nn.parallel.DistributedDataParallel, torch.nn.DataParallel,)) else model
 
 
 ########CONFIGS########
