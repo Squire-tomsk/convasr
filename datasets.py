@@ -185,6 +185,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			) for i in range(int(self.cumlen[index - 1] if index >= 1 else 0), int(self.cumlen[index]))]
 
 	def __getitem__(self, index):
+		# TODO вынести максимум логики из __getitem__ в __init__
 		waveform_transform_debug = (
 			lambda audio_path,
 			sample_rate,
@@ -197,26 +198,37 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 		audio_path = self.audio_path[index]
 		
-		transcript = self.load_example(index)
-		
-		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration = self.max_duration, dtype = self.audio_dtype) if self.frontend is None or self.frontend.read_audio else (audio_path, self.sample_rate)
+		transcript = self.load_example(index) # list of examples from one file
+		## TODO is frontend in dataser required? Test performance
+		## TODO: collapse signal channels into one if self.mono = True
+		## signal shape here shaping.CT
+		if self.frontend is None or self.frontend.read_audio:
+			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration = self.max_duration, dtype = self.audio_dtype)
+		else:
+			signal, sample_rate = audio_path, self.sample_rate
 
-		#TODO: support forced mono even if transcript is given
-		#TODO: subsample speaker labels according to features
+		## TODO: subsample speaker labels according to features
 
 		some_segments_have_not_begin_end = any(t['begin'] == transcripts.time_missing and t['end'] == transcripts.time_missing for t in transcript)
 		some_segments_have_ref = any(bool(t['ref']) for t in transcript)
 		replace_transcript = self.join_transcript or (not transcript) or (some_segments_have_not_begin_end and some_segments_have_ref)
 
 		if replace_transcript:
+			# мы хотим вернуть файл целиком вместе с транскипцией, схлапываем список transcript в один пример
 			assert len(signal) == 1, 'only mono supported for now'
 			ref_full = [t['ref'] for t in transcript]
+			# shaping.1Y для каждого символа из ref указан спикер
 			speaker = torch.cat([
 				torch.full((len(ref) + 1, ), t['speaker'],
 							dtype = torch.int64).scatter_(0, torch.tensor(len(ref)), transcripts.speaker_missing) for t,
 				ref in zip(transcript, ref_full)
 			])[:-1].unsqueeze(0)
-
+			# формируем пример из одного куска
+			# example_id это ключ для словаря self.meta который содержит всю метаинформацию для всех примеров датасета
+			# нам бы не хотелось формировать его в __getitem__ хотелось бы чтобы example_id определялся в конструкторе
+			# словарь meta вынесен из батча, так как было сложно
+			# хотим чтобы meta была предподсчитана в __init__
+			# вынести всю метаинформацию в __init__
 			transcript = [
 				dict(
 					audio_path = audio_path,
@@ -228,6 +240,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				)
 			]
 		else:
+			# мы хотим вернуть набор примеров, так как они были считаны
+			# мы подсчитываем всю информацию необходимую для нарезки аудио
 			transcript = [
 				dict(
 					audio_path = audio_path,
@@ -242,17 +256,22 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				for t in sorted(transcript, key = transcripts.sort_key)
 				for channel in ([t['channel']] if t['channel'] != transcripts.channel_missing else range(len(signal)))
 			]
+			# TODO заменить torch.LongTensor на torch.tensor
 			speaker = torch.LongTensor([t.pop('speaker') for t in transcript]).unsqueeze(-1)
 		## TODO check logic
 		features = []
+		# это код нарезки
 		for t in transcript:
 			channel = t.pop('channel')
 			time_slice = slice(t.pop('begin_samples'), t.pop('end_samples')) # pop is required independent of segmented
+			# здесь происходит разделение сигнала по каналам и нарезка по времен
+			# signal shaping.CT -> shaping.1T
 			if self.segmented and not self.debug_short_long_records_features_from_whole_normalized_signal:
 				segment = signal[None, channel, time_slice]
 			else:
 				segment = signal[None, channel, :] # begin, end meta could be corrupted, thats why we dont use it here
 			if self.frontend is not None:
+				# этот страшный флаг значит, что фронтентд применяется ко всему аудио, а потом из фичей производится нарезка сегментов
 				if self.debug_short_long_records_features_from_whole_normalized_signal:
 					segment_features = self.frontend(segment)
 					hop_length = self.frontend.hop_length
@@ -273,6 +292,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			targets.append(encoded_transcripts)
 
 		# not batch mode
+		# if not self.segmented инициализирует пример, когда у нас возвращается из __getitem__ один пример кортеж элементов
+		# иначе возвращается кортеж списков примеров
 		if not self.segmented:
 			transcript, speaker, features = transcript[0], speaker[0], features[0]
 			targets = [target[0] for target in targets]
@@ -281,6 +302,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	def __len__(self):
 		return len(self.cumlen)
 
+	# TODO проверить работу во всех режимах
 	def collate_fn(self, batch) -> typing.Tuple[typing.List[dict], shaping.BS, shaping.BCT, shaping.B, shaping.BLY, shaping.B]:
 		if self.segmented:
 			batch = list(zip(*batch))

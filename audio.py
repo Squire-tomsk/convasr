@@ -22,7 +22,7 @@ def read_audio(
         raw_bytes=None,
         raw_sample_rate=None,
         raw_num_channels=None,
-):
+): # shaping.CT
 	assert dtype in [None, 'int16', 'float32']
 	assert backend in [None, 'scipy', 'soundfile', 'ffmpeg', 'sox']
 
