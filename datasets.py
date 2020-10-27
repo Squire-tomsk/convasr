@@ -43,7 +43,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		sample_rate,
 		frontend = None,
 		speaker_names = None,
-		waveform_transform_debug_dir = None,
 		min_duration = None,
 		max_duration = None,
 		duration_filter = True,
@@ -70,7 +69,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.text_pipelines = text_pipelines
 		self.frontend = frontend
 		self.sample_rate = sample_rate
-		self.waveform_transform_debug_dir = waveform_transform_debug_dir
 		self.segmented = segmented
 		self.time_padding_multiple = time_padding_multiple
 		self.mono = mono
@@ -186,26 +184,13 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 	def __getitem__(self, index):
 		# TODO вынести максимум логики из __getitem__ в __init__
-		waveform_transform_debug = (
-			lambda audio_path,
-			sample_rate,
-			signal: audio.write_audio(
-				os.path.join(self.waveform_transform_debug_dir, os.path.basename(audio_path) + '.wav'),
-				signal,
-				sample_rate
-			)
-		) if self.waveform_transform_debug_dir else None
-
 		audio_path = self.audio_path[index]
 		
 		transcript = self.load_example(index) # list of examples from one file
 		## TODO is frontend in dataser required? Test performance
 		## TODO: collapse signal channels into one if self.mono = True
 		## signal shape here shaping.CT
-		if self.frontend is None or self.frontend.read_audio:
-			signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration = self.max_duration, dtype = self.audio_dtype)
-		else:
-			signal, sample_rate = audio_path, self.sample_rate
+		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono, backend = self.audio_backend, duration = self.max_duration, dtype = self.audio_dtype)
 
 		## TODO: subsample speaker labels according to features
 
@@ -278,7 +263,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 					segment_features = segment_features[:, :, time_slice.start // hop_length:time_slice.stop // hop_length]
 					features.append(segment_features.squeeze(0))
 				else:
-					features.append(self.frontend(segment, waveform_transform_debug = waveform_transform_debug).squeeze(0))
+					features.append(self.frontend(segment).squeeze(0))
 			else:
 				features.append(segment)
 
