@@ -221,8 +221,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		                                       dtype = self.audio_dtype)
 
 		for t in transcript:
-			t['begin_samples'] = int(t['begin'] * sample_rate) if t['begin'] != transcripts.time_missing else 0
-			t['end_samples'] = 1 + int(t['end'] * sample_rate) if t['end'] != transcripts.time_missing else signal.shape[1]
 			t['example_id'] = self.example_id(t)
 
 		speaker = torch.tensor([t.pop('speaker') for t in transcript], dtype = torch.int64, device = 'cpu').unsqueeze(-1)
@@ -231,7 +229,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		# slicing code in time and channel dimension
 		for t in transcript:
 			channel = t.pop('channel')
-			time_slice = slice(t.pop('begin_samples'), t.pop('end_samples'))  # pop is required independent of segmented
+			time_slice = slice(int(t['begin'] * sample_rate) if t['begin'] != transcripts.time_missing else 0,
+			                   1 + int(t['end'] * sample_rate) if t['end'] != transcripts.time_missing else signal.shape[1])
 			# signal shaping.CT -> shaping.1T
 			if self.segmented and not self.debug_short_long_records_features_from_whole_normalized_signal:
 				segment = signal[None, channel, time_slice]
