@@ -8,6 +8,7 @@ import utils
 ref_missing = ''
 speaker_name_missing = ''
 speaker_missing = 0
+speaker_pad = -1
 channel_missing = -1
 time_missing = -1
 _er_missing = -1.0
@@ -89,7 +90,7 @@ def collect_speaker_names(transcript, speaker_names = [], num_speakers = 1, set_
 	if not transcript:
 		return
 
-	has_speaker = has_speaker_names = has_channel = True
+	has_speaker = has_speaker_names = True
 	for t in transcript:
 		has_speaker &= t.get('speaker') is not None
 		has_speaker_names &= bool(t.get('speaker_name'))
@@ -191,11 +192,11 @@ def sort(transcript):
 
 
 def sort_key(t):
-	return (t.get('audio_path'), t.get('begin'), t.get('end'), t.get('channel'))
+	return t.get('audio_path'), t.get('begin'), t.get('end'), t.get('channel')
 
 
 def group_key(t):
-	return t.get('audio_path')
+	return t.get('audio_path'), t.get('channel')
 
 
 def prune(
