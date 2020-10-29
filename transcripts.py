@@ -45,7 +45,7 @@ def load(data_path):
 			for t in transcript:
 				t['audio_path'] = data_path
 	else:
-		transcript = [dict(audio_path = data_path)]
+		raise RuntimeError(f'Cannot load {data_path}. File type unknown.')
 
 	return transcript
 

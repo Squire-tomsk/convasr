@@ -48,10 +48,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			min_duration = None,
 			max_duration = None,
 			duration_filter = True,
-			min_ref_len = None,
-			max_ref_len = None,
 			max_num_channels = 2,
-			ref_len_filter = True,
 			mono = True,
 			audio_dtype = 'float32',
 			segmented = False,
@@ -83,7 +80,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		tic = time.time()
 
 		transcripts_read = list(map(transcripts.load, data_paths))
-		_print('Dataset reading time: ', time.time() - tic);
+		_print('Dataset reading time: ', time.time() - tic)
 		tic = time.time()
 
 		# TODO group only segmented = True
@@ -94,7 +91,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			for _, example in transcript:
 				segments_by_audio_path.append(list(example))
 
-		speaker_names_filtered = set()
 		examples_filtered = []
 		examples_lens = []
 		transcript = []
@@ -124,7 +120,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.speaker_names = transcripts.collect_speaker_names(transcript, speaker_names = speaker_names or [],
 		                                                       num_speakers = max_num_channels, set_speaker = True)
 
-		_print('Dataset construction time: ', time.time() - tic);
+		_print('Dataset construction time: ', time.time() - tic)
 		tic = time.time()
 
 		self.bucket = torch.ShortTensor([e[0]['bucket'] for e in examples_filtered])
@@ -263,7 +259,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				for channel in ([t['channel']] if t['channel'] != transcripts.channel_missing else range(len(signal)))
 			]
 			# TODO заменить torch.LongTensor на torch.tensor
-			speaker = torch.LongTensor([t.pop('speaker') for t in transcript]).unsqueeze(-1)
+			speaker = torch.tensor([t.pop('speaker') for t in transcript], dtype = torch.long, device = 'cpu').unsqueeze(-1)
 		## TODO check logic
 		features = []
 		# это код нарезки
