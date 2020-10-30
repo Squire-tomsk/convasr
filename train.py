@@ -537,7 +537,7 @@ def main(args):
 			time_padding_multiple = args.batch_time_padding_multiple,
 			bucket = lambda example: int(
 				math.ceil(
-					((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
+					((example[-1]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
 				)
 			),
 			pop_meta = True,
@@ -564,7 +564,7 @@ def main(args):
 			time_padding_multiple=args.batch_time_padding_multiple,
 			bucket=lambda example: int(
 				math.ceil(
-					((example[0]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
+					((example[-1]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
 				)
 			),
 			pop_meta=True,

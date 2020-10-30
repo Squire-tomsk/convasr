@@ -45,11 +45,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			text_pipelines: typing.List[language_processing.ProcessingPipeline],
 			sample_rate: int,
 			frontend = None,
-			speaker_names: typing.List[str] = None,
 			max_audio_file_size: float = None, ##MB
 			min_duration: float = None,
 			max_duration: float = None,
-			max_num_channels: int = 2,
 			mono: bool = True,
 			audio_dtype: str = 'float32',
 			segmented: bool = False,
@@ -57,7 +55,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			audio_backend: typing.Optional[str] = None,
 			exclude: typing.Optional[typing.Set] = None,
 			join_transcript: bool = False,
-			bucket: typing.Optional[typing.Callable[[typing.Dict], int]] = None,
+			bucket: typing.Callable[[typing.List[typing.Dict]], int] = lambda transcript: 0,
 			pop_meta: bool = False,
 			string_array_encoding: str = 'utf_16_le',
 			_print: typing.Callable = print,
@@ -78,7 +76,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.audio_dtype = audio_dtype
 
 		data_paths = data_paths if isinstance(data_paths, list) else [data_paths]
-		exclude = set(exclude)
 
 		tic = time.time()
 
@@ -88,23 +85,20 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		tic = time.time()
 
 		for t in segments:
-			t['ref'] = t.get('ref', transcripts.ref_missing)
-			t['begin'] = t.get('begin', transcripts.time_missing)
-			t['end'] = t.get('end', transcripts.time_missing)
-			t['channel'] = t.get('channel', transcripts.channel_missing)
-			t['speaker'] = t.get('speaker', transcripts.speaker_missing)
+			t['ref'] = t.get('ref') or transcripts.ref_missing
+			t['begin'] = t.get('begin') or transcripts.time_missing
+			t['end'] = t.get('end') or transcripts.time_missing
+			t['channel'] = t.get('channel') or transcripts.channel_missing
+			t['speaker'] = t.get('speaker') or transcripts.speaker_missing
+			t['speaker_name'] = t.get('speaker_name') or transcripts.default_speaker_names[t['speaker']]
 
-		transcripts.collect_speaker_names(segments,
-		                                  peaker_names = speaker_names or [],
-		                                  num_speakers = max_num_channels,
-		                                  set_speaker = True)
-
+		buckets = []
 		grouped_segments = []
 		transcripts_len = []
-		for group_key, transcript in itertools.groupby(segments, transcripts.group_key):
+		for group_key, transcript in itertools.groupby(sorted(segments, key = transcripts.group_key), transcripts.group_key):
 			transcript = sorted(transcript, key = transcripts.sort_key)
 
-			if os.path.getsize(transcript[0]['audio_path']) / (1024 ** 2) > max_audio_file_size:
+			if max_audio_file_size is not None and os.path.getsize(transcript[0]['audio_path']) / (1024 ** 2) > max_audio_file_size:
 				continue
 
 			if self.join_transcript:
@@ -122,15 +116,17 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			if max_duration is not None:
 				transcript = [t for t in transcript if t['duration'] <= max_duration]
 
+			b = bucket(transcript)
 			for t in transcript:
-				t['bucket'] = bucket(t)
+				t['bucket'] = b
+			buckets.append(b)
 			grouped_segments.extend(transcript)
 			transcripts_len.append(len(transcript))
 
 		_print('Dataset construction time: ', time.time() - tic)
 		tic = time.time()
 
-		self.bucket = torch.tensor([t['bucket'] for t in grouped_segments], dtype = torch.short, device = 'cpu')
+		self.bucket = torch.tensor(buckets, dtype = torch.short, device = 'cpu')
 		self.audio_path = utils.TensorBackedStringArray([t['audio_path'] for t in grouped_segments], encoding = string_array_encoding)
 		self.ref = utils.TensorBackedStringArray([t['ref'] for t in grouped_segments], encoding = string_array_encoding)
 		self.begin = torch.tensor([t['begin'] for t in grouped_segments], dtype = torch.float64, device = 'cpu')
@@ -138,16 +134,16 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.channel = torch.tensor([t['channel'] for t in grouped_segments], dtype = torch.int8, device = 'cpu')
 		self.speaker_names = utils.TensorBackedStringArray([t['speaker_name'] for t in grouped_segments], encoding = string_array_encoding)
 		if self.join_transcript:
-			max_len = max(t['speaker'].shape[1] for t in transcript)
+			max_len = max(t['speaker'].shape[1] for t in grouped_segments)
 			padded_speakers = [F.pad(t['speaker'], [0, 0, 0, max_len-t['speaker'].shape[1]], value = transcripts.speaker_pad) for t in transcript]
 			self.speaker = torch.cat(padded_speakers)
 		else:
-			self.speaker = torch.tensor([t['speaker'] for t in transcript], dtype = torch.int64, device = 'cpu')
+			self.speaker = torch.tensor([t['speaker'] for t in grouped_segments], dtype = torch.int64, device = 'cpu')
 		self.cumlen = torch.tensor(transcripts_len, dtype = torch.int16, device = 'cpu').cumsum(dim = 0, dtype = torch.int64)
 		if pop_meta:
 			self.meta = {}
 		else:
-			self.meta = {self.example_id(t): t for t in transcript}
+			self.meta = {self.example_id(t): t for t in grouped_segments}
 		_print('Dataset tensors creation time: ', time.time() - tic)
 
 	def state_dict(self) -> dict:
@@ -223,7 +219,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		for t in transcript:
 			t['example_id'] = self.example_id(t)
 
-		speaker = torch.tensor([t.pop('speaker') for t in transcript], dtype = torch.int64, device = 'cpu').unsqueeze(-1)
+		speaker = [t.pop('speaker') for t in transcript]
 
 		features = []
 		# slicing code in time and channel dimension
@@ -298,13 +294,17 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		return (meta, s, x, xlen, y, ylen)
 
 	def _join_transcript(self, transcript):
+		audio_path = transcript[0]['audio_path']
+		assert all(t['audio_path'] == audio_path for t in transcript)
 		ref = ' '.join(t['ref'].strip() for t in transcript)
 		speaker = []
 		for t in transcript:
 			speaker.append(
-				torch.full((len(t['ref'] + 1), t['speaker']), dtype = torch.int64).scatter_(0, torch.tensor(len()))
+				torch.full((len(t['ref']) + 1,), fill_value = t['speaker'], dtype = torch.int64, device = 'cpu')
+					 .scatter_(0, torch.tensor(len(t['ref'])), transcripts.speaker_missing) # space handling
 			)
 		speaker = torch.cat(speaker)[:-1].unsqueeze(0) # [:-1] to drop last space, because of len(t['ref'] + 1)
+		assert len(ref) == speaker.shape[-1]
 		if all(t['speaker'] == transcript[0]['speaker'] for t in transcript):
 			speaker_name = transcript[0].get('speaker_name', transcripts.default_speaker_names[transcript[0]['speaker']])
 		else:
@@ -312,7 +312,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		duration = audio.compute_duration(transcript[0]['audio_path'])
 		channel = transcript[0]['channel']
 		assert all(t['channel'] == channel for t in transcript)
-		return dict(ref = ref,
+		return dict(audio_path = audio_path,
+					ref = ref,
 					begin = 0.0,
 					end = duration,
 					speaker = speaker,
