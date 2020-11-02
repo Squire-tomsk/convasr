@@ -108,7 +108,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		for group_key, transcript in groupped_transcripts:
 			transcript = sorted(transcript, key = transcripts.sort_key)
 			if self.join_transcript:
-				transcript = [transcripts.join_transcript(transcript)]
+				transcript = transcripts.join_transcript(transcript)
 
 			transcript = transcripts.prune(transcript,
 			                               allowed_audio_names = set(t['audio_name'] for t in transcript if t['audio_name'] not in exclude),

@@ -2,6 +2,10 @@ import functools
 import typing
 import torch
 
+# equal to 1T
+class _T(torch.Tensor):
+	pass
+
 class T(torch.Tensor):
 	pass
 
