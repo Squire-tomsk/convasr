@@ -51,9 +51,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			sample_rate: int,
 			mode: str = DEFAULT_MODE,
 			frontend = None,
-			max_audio_file_size: float = None, #bytes
-			min_duration: float = 0.0,
-			max_duration: float = 24.0 * 3600, #24h
+			max_audio_file_size: typing.Optional[float] = None, #bytes
+			min_duration: typing.Optional[float] = None,
+			max_duration: typing.Optional[float] = None,
 			mono: bool = True,
 			audio_dtype: str = 'float32',
 			time_padding_multiple: int = 1,
@@ -113,13 +113,14 @@ class AudioTextDataset(torch.utils.data.Dataset):
 				transcript = transcripts.join_transcript(transcript)
 
 			if exclude is not None:
-				allowed_audio_names = set(transcript.audio_name(t) for t in transcript if transcript.audio_name(t) not in exclude)
+				allowed_audio_names = set(transcripts.audio_name(t) for t in transcript if transcripts.audio_name(t) not in exclude)
 			else:
 				allowed_audio_names = None
 
 			transcript = transcripts.prune(transcript,
 			                               allowed_audio_names = allowed_audio_names,
-			                               duration = (min_duration, max_duration,),
+			                               duration = (min_duration if min_duration is not None else 0.0,
+			                                           max_duration if max_duration is not None else 24.0 * 3600,), #24h
 			                               max_audio_file_size = max_audio_file_size)
 			transcript = list(transcript)
 			for t in transcript:
@@ -142,12 +143,12 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.end = torch.tensor([t['end'] for t in grouped_segments], dtype = torch.float64, device = 'cpu')
 		self.channel = torch.tensor([t['channel'] for t in grouped_segments], dtype = torch.int8, device = 'cpu')
 		self.example_id = utils.TensorBackedStringArray([t['example_id'] for t in grouped_segments], encoding = string_array_encoding)
-		if self.mode == AudioTextDataset.DEFAULT_MODE:
-			self.speaker = torch.tensor([t['speaker'] for t in grouped_segments], dtype = torch.int64, device = 'cpu')
-		else:
+		if self.mode == AudioTextDataset.BATCHED_CHANNELS_MODE:
 			max_len = max(t['speaker'].shape[1] for t in grouped_segments)
 			padded_speakers = [F.pad(t['speaker'], [0, 0, 0, max_len - t['speaker'].shape[1]], value = transcripts.speaker_pad) for t in transcript]
 			self.speaker = torch.cat(padded_speakers)
+		else:
+			self.speaker = torch.tensor([t['speaker'] for t in grouped_segments], dtype = torch.int64, device = 'cpu')
 		self.cumlen = torch.tensor(transcripts_len, dtype = torch.int16, device = 'cpu').cumsum(dim = 0, dtype = torch.int64)
 		if pop_meta:
 			self.meta = {}
@@ -199,11 +200,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		transcript = []
 		for i in range(int(self.cumlen[index - 1]) if index > 0 else 0, int(self.cumlen[index])):
 			ref = self.ref[i]
-			if self.mode == AudioTextDataset.DEFAULT_MODE:
-				speaker = torch.full((1, len(ref)), fill_value = self.speaker[i], dtype = torch.int64, device = 'cpu')
-			else:
+			if self.mode == AudioTextDataset.BATCHED_CHANNELS_MODE:
 				speaker = self.speaker[i: i + 1]
 				speaker = speaker[:, speaker[0] != transcripts.speaker_pad]
+			else:
+				speaker = torch.full((1, len(ref)), fill_value = self.speaker[i], dtype = torch.int64, device = 'cpu')
 			transcript.append(
 				dict(
 					audio_path = self.audio_path[index],

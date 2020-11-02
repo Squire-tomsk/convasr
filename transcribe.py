@@ -77,9 +77,9 @@ def main(args, ext_json = ['.json', '.json.gz']):
 	exclude = set(
 		[os.path.splitext(basename)[0]
 			for basename in os.listdir(args.output_path)
-			if basename.endswith('.json')] if args.skip_processed else []
-	)
-	data_paths = [path for path in data_paths if os.path.basename(path) not in exclude]
+			if basename.endswith('.json')]) if args.skip_processed else None
+
+	data_paths = [path for path in data_paths if exclude is None or os.path.basename(path) not in exclude]
 
 	text_pipeline, frontend, model, generator = setup(args)
 	val_dataset = datasets.AudioTextDataset(

@@ -25,6 +25,7 @@ class Segment(dict):
 class Transcript(list):
 	pass
 
+
 def flatten(segments):
 	return utils.flatten(segments)
 
@@ -48,7 +49,7 @@ def load(data_path):
 			for t in transcript:
 				t['audio_path'] = data_path
 	else:
-		raise RuntimeError(f'Cannot load {data_path}. File type unknown.')
+		transcript = [dict(audio_path = data_path)]
 
 	return transcript
 
@@ -205,7 +206,7 @@ Interval = typing.NewType('Interval', typing.Tuple[typing.Union[float, int], typ
 
 
 def prune(
-	transcript,
+	transcript: Transcript,
 	align_boundary_words: bool = False,
 	cer: typing.Optional[Interval] = None,
 	wer: typing.Optional[Interval] = None,
@@ -242,16 +243,17 @@ def prune(
 		prev = t
 
 
-def join_transcript(transcript, join_channels = False):
+def join_transcript(transcript: Transcript, join_channels: bool = False):
 	joined_transcripts = []
 
 	if join_channels:
-		groupped_t = zip([channel_missing] * len(transcript), transcript)
+		groupped_t = [(channel_missing, transcript)]
 	else:
 		channel_key = lambda t: t.get('channel', channel_missing)
 		groupped_t = itertools.groupby(sorted(transcript, key = channel_key), channel_key)
 
 	for channel, transcript in groupped_t:
+		transcript = list(transcript)
 		audio_path = transcript[0]['audio_path']
 		assert all(t['audio_path'] == audio_path for t in transcript)
 		ref = ' '.join(t['ref'].strip() for t in transcript)
