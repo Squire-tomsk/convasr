@@ -126,6 +126,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			for t in transcript:
 				t['example_id'] = AudioTextDataset.get_example_id(t)
 
+			if len(transcript) == 0:
+				continue
+
 			bucket = bucket_fn(transcript)
 			for t in transcript:
 				t['bucket'] = bucket
