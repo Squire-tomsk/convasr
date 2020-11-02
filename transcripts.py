@@ -1,9 +1,9 @@
 import os
 import json
-import torch
-import torch.nn.functional as F
+import typing
 import audio
 import utils
+import torch
 
 ref_missing = ''
 speaker_name_missing = ''
@@ -199,38 +199,73 @@ def group_key(t):
 	return t.get('audio_path'), t.get('channel')
 
 
+Interval = typing.NewType('Interval', typing.Tuple[typing.Union[float, int], typing.Union[float, int]])
+
+
 def prune(
 	transcript,
-	align_boundary_words = False,
-	cer = None,
-	wer = None,
-	mer = None,
-	duration = None,
-	gap = None,
-	num_speakers = None,
-	audio_name = None,
-	unk = None,
-	groups = None
+	align_boundary_words: bool = False,
+	cer: typing.Optional[Interval] = None,
+	wer: typing.Optional[Interval] = None,
+	mer: typing.Optional[Interval] = None,
+	duration: typing.Optional[Interval] = None,
+	gap: typing.Optional[Interval] = None,
+	num_speakers: typing.Optional[Interval] = None,
+	allowed_audio_names: typing.Set[str, ...] = None,
+	allowed_unk_count: typing.Optional[Interval] = None,
+	groups: typing.Set = None,
+	max_audio_file_size: typing.Optional[int] = None
 ):
+	if max_audio_file_size is not None and os.path.getsize(transcript[0]['audio_path']) > max_audio_file_size:
+		yield from ()
 	is_aligned = lambda w: (w.get('type') or w.get('error_tag')) == 'ok'
 	duration_check = lambda t: duration is None or duration[0] <= compute_duration(t) <= duration[1]
 	boundary_check = lambda t: ((not t.get('words')) or (not align_boundary_words) or
 								(is_aligned(t['words'][0]) and is_aligned(t['words'][-1])))
 	gap_check = lambda t, prev: prev is None or gap is None or gap[0] <= t['begin'] - prev['end'] <= gap[1]
-	unk_check = lambda t: unk is None or unk[0] <= t.get('ref', '').count('*') <= unk[1]
+	unk_check = lambda t: allowed_unk_count is None or allowed_unk_count[0] <= t.get('ref', '').count('*') <= allowed_unk_count[1]
 	speakers_check = lambda t: num_speakers is None or num_speakers[0] <= (t.get('speaker') or ''
 																			).count(',') + 1 <= num_speakers[1]
 	cer_check = lambda t: cer is None or t.get('cer') is None or cer[0] <= t['cer'] <= cer[1]
 	wer_check = lambda t: wer is None or t.get('wer') is None or wer[0] <= t['wer'] <= wer[1]
 	mer_check = lambda t: mer is None or t.get('mer') is None or mer[0] <= t['mer'] <= mer[1]
 	groups_check = lambda t: groups is None or t.get('group') is None or t['group'] in groups
+	name_check = lambda t: allowed_audio_names is None or t.get('audio_name') in allowed_audio_names
 
 	prev = None
 	for t in transcript:
 		if groups_check(t) and unk_check(t) and duration_check(t) and cer_check(t) and wer_check(t) and mer_check(
-			t) and boundary_check(t) and gap_check(t, prev) and speakers_check(t):
+			t) and boundary_check(t) and gap_check(t, prev) and speakers_check(t) and name_check(t):
 			yield t
 		prev = t
+
+
+def join_transcript(transcript):
+	audio_path = transcript[0]['audio_path']
+	assert all(t['audio_path'] == audio_path for t in transcript)
+	ref = ' '.join(t['ref'].strip() for t in transcript)
+	speaker = []
+	for t in transcript:
+		speaker.append(
+			torch.full((len(t['ref']) + 1,), fill_value = t['speaker'], dtype = torch.int64, device = 'cpu')
+				 .scatter_(0, torch.tensor(len(t['ref'])), speaker_missing) # space handling
+		)
+	speaker = torch.cat(speaker)[:-1].unsqueeze(0) # [:-1] to drop last space, because of len(t['ref'] + 1)
+	assert len(ref) == speaker.shape[-1]
+	if all(t['speaker'] == transcript[0]['speaker'] for t in transcript):
+		speaker_name = transcript[0].get('speaker_name', default_speaker_names[transcript[0]['speaker']])
+	else:
+		speaker_name = '_multispeaker'
+	duration = audio.compute_duration(transcript[0]['audio_path'])
+	channel = transcript[0]['channel']
+	assert all(t['channel'] == channel for t in transcript)
+	return dict(audio_path = audio_path,
+				ref = ref,
+				begin = 0.0,
+				end = duration,
+				speaker = speaker,
+				speaker_name = speaker_name,
+				channel = channel)
 
 
 def compute_duration(t, hours = False):

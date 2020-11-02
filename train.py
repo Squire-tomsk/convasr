@@ -535,7 +535,7 @@ def main(args):
 			min_duration = args.min_duration,
 			max_duration = args.max_duration,
 			time_padding_multiple = args.batch_time_padding_multiple,
-			bucket = lambda example: int(
+			bucket_fn = lambda example: int(
 				math.ceil(
 					((example[-1]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
 				)
@@ -562,7 +562,7 @@ def main(args):
 			min_duration=args.min_duration,
 			max_duration=args.max_duration,
 			time_padding_multiple=args.batch_time_padding_multiple,
-			bucket=lambda example: int(
+			bucket_fn =lambda example: int(
 				math.ceil(
 					((example[-1]['end'] - example[0]['begin']) / args.window_stride + 1) / args.batch_time_padding_multiple
 				)

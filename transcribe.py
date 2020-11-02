@@ -242,7 +242,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				cer = args.cer,
 				duration = args.duration,
 				gap = args.gap,
-				unk = args.unk,
+				allowed_unk_count = args.unk,
 				num_speakers = args.num_speakers
 			)
 		)
