@@ -266,7 +266,9 @@ def join_transcript(transcript, join_channels = False):
 		if all(t['speaker'] == transcript[0]['speaker'] for t in transcript):
 			speaker_name = transcript[0].get('speaker_name', default_speaker_names[transcript[0]['speaker']])
 		else:
-			speaker_name = '_multispeaker'
+			speaker_name = set(t.get('speaker_name', default_speaker_names[t['speaker']])  for t in transcript)
+			speaker_name = sorted(speaker_name)
+			speaker_name = ','.join(speaker_name)
 		duration = audio.compute_duration(transcript[0]['audio_path'])
 		joined_transcripts.append(dict(audio_path = audio_path,
 										ref = ref,
