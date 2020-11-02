@@ -86,13 +86,12 @@ def main(args, ext_json = ['.json', '.json.gz']):
 		data_paths, [text_pipeline],
 		args.sample_rate,
 		frontend = frontend if not args.frontend_in_model else None,
-		segmented = True,
 		mono = args.mono,
 		time_padding_multiple = args.batch_time_padding_multiple,
 		audio_backend = args.audio_backend,
 		exclude = exclude,
 		max_duration = args.transcribe_first_n_sec,
-		join_transcript = args.join_transcript,
+		mode = 'batched_channels' if args.join_transcript else 'batched_transcript',
 		string_array_encoding = args.dataset_string_array_encoding,
 		debug_short_long_records_features_from_whole_normalized_signal = args.debug_short_long_records_features_from_whole_normalized_signal
 	)

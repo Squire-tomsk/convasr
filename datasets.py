@@ -40,22 +40,25 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	If speaker_names are not set and speakers are not set, uses channel indices as speakers
 	'''
 
+	DEFAULT_MODE = 'default'
+	BATCHED_CHANNELS_MODE = 'batched_channels'
+	BATCHED_TRANSCRIPT_MODE = 'batched_transcript'
+
 	def __init__(
 			self,
 			data_paths: typing.List[str],
 			text_pipelines: typing.List[language_processing.ProcessingPipeline],
 			sample_rate: int,
+			mode: str = DEFAULT_MODE,
 			frontend = None,
 			max_audio_file_size_MB: float = None,
 			min_duration: float = None,
 			max_duration: float = None,
 			mono: bool = True,
 			audio_dtype: str = 'float32',
-			segmented: bool = False,
 			time_padding_multiple: int = 1,
 			audio_backend: typing.Optional[str] = None,
 			exclude: typing.Optional[typing.Set] = None,
-			join_transcript: bool = False,
 			bucket_fn: typing.Callable[[typing.List[typing.Dict]], int] = lambda transcript: 0,
 			pop_meta: bool = False,
 			string_array_encoding: str = 'utf_16_le',
@@ -63,14 +66,13 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			debug_short_long_records_features_from_whole_normalized_signal: bool = False
 	):
 		self.debug_short_long_records_features_from_whole_normalized_signal = debug_short_long_records_features_from_whole_normalized_signal
-		self.join_transcript = join_transcript
+		self.mode = mode
 		self.min_duration = min_duration
 		self.max_duration = max_duration
 		self.max_audio_file_size = max_audio_file_size_MB
 		self.text_pipelines = text_pipelines
 		self.frontend = frontend
 		self.sample_rate = sample_rate
-		self.segmented = segmented
 		self.time_padding_multiple = time_padding_multiple
 		self.mono = mono
 		self.audio_backend = audio_backend
@@ -93,21 +95,21 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			t['ref'] = get_or_else(t, 'ref', transcripts.ref_missing)
 			t['begin'] = get_or_else(t, 'begin', transcripts.time_missing)
 			t['end'] = get_or_else(t, 'end', transcripts.time_missing)
-			t['channel'] = get_or_else(t, 'channel', transcripts.channel_missing)
+			t['channel'] = get_or_else(t, 'channel', transcripts.channel_missing) if not self.mono else transcripts.channel_missing
 			t['speaker'] = get_or_else(t, 'speaker', transcripts.speaker_missing)
 			t['speaker_name'] = get_or_else(t, 'speaker_name', transcripts.default_speaker_names[t['speaker']])
 
 		buckets = []
 		grouped_segments = []
 		transcripts_len = []
-		if segmented:
-			groupped_transcripts = itertools.groupby(sorted(segments, key = transcripts.group_key), transcripts.group_key)
+		if self.mode == AudioTextDataset.DEFAULT_MODE:
+			groupped_transcripts = zip(range(len(segments)), segments)
 		else:
-			groupped_transcripts = zip(range(len(segments), segments))
+			groupped_transcripts = itertools.groupby(sorted(segments, key = transcripts.group_key), transcripts.group_key)
 
 		for group_key, transcript in groupped_transcripts:
 			transcript = sorted(transcript, key = transcripts.sort_key)
-			if self.join_transcript:
+			if self.mode == AudioTextDataset.BATCHED_CHANNELS_MODE:
 				transcript = transcripts.join_transcript(transcript)
 
 			transcript = transcripts.prune(transcript,
@@ -134,12 +136,12 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.end = torch.tensor([t['end'] for t in grouped_segments], dtype = torch.float64, device = 'cpu')
 		self.channel = torch.tensor([t['channel'] for t in grouped_segments], dtype = torch.int8, device = 'cpu')
 		self.example_id = utils.TensorBackedStringArray([t['example_id'] for t in grouped_segments], encoding = string_array_encoding)
-		if self.join_transcript:
-			max_len = max(t['speaker'].shape[1] for t in grouped_segments)
-			padded_speakers = [F.pad(t['speaker'], [0, 0, 0, max_len-t['speaker'].shape[1]], value = transcripts.speaker_pad) for t in transcript]
-			self.speaker = torch.cat(padded_speakers)
-		else:
+		if self.mode == AudioTextDataset.DEFAULT_MODE:
 			self.speaker = torch.tensor([t['speaker'] for t in grouped_segments], dtype = torch.int64, device = 'cpu')
+		else:
+			max_len = max(t['speaker'].shape[1] for t in grouped_segments)
+			padded_speakers = [F.pad(t['speaker'], [0, 0, 0, max_len - t['speaker'].shape[1]], value = transcripts.speaker_pad) for t in transcript]
+			self.speaker = torch.cat(padded_speakers)
 		self.cumlen = torch.tensor(transcripts_len, dtype = torch.int16, device = 'cpu').cumsum(dim = 0, dtype = torch.int64)
 		if pop_meta:
 			self.meta = {}
@@ -191,11 +193,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		transcript = []
 		for i in range(int(self.cumlen[index - 1]), int(self.cumlen[index])):
 			ref = self.ref[i]
-			if self.join_transcript:
-				speaker = self.speaker[i : i + 1]
-				speaker = speaker[:, speaker[0] != transcripts.speaker_pad]
-			else:
+			if self.mode == AudioTextDataset.DEFAULT_MODE:
 				speaker = torch.full((1, len(ref)), fill_value = self.speaker[i], dtype = torch.int64, device = 'cpu')
+			else:
+				speaker = self.speaker[i: i + 1]
+				speaker = speaker[:, speaker[0] != transcripts.speaker_pad]
 			transcript.append(
 				dict(
 					audio_path = self.audio_path[index],
@@ -227,17 +229,17 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			time_slice = slice(int(t['begin'] * sample_rate) if t['begin'] != transcripts.time_missing else 0,
 			                   1 + int(t['end'] * sample_rate) if t['end'] != transcripts.time_missing else signal.shape[1])
 			# signal shaping.CT -> segment shaping.1T
-			if self.segmented and not self.debug_short_long_records_features_from_whole_normalized_signal:
-				segment = signal[None, channel, time_slice]
-			else:
+			if self.mode == AudioTextDataset.DEFAULT_MODE:
 				segment = signal[None, channel, :]  # begin, end meta could be corrupted, thats why we dont use it here
+			else:
+				segment = signal[None, channel, time_slice]
+
 			if self.frontend is not None:
 				# debug_short_long_records_features_from_whole_normalized_signal means apply frontend to whole signal instead of segment
 				if self.debug_short_long_records_features_from_whole_normalized_signal:
 					segment_features = self.frontend(segment)
 					hop_length = self.frontend.hop_length
-					segment_features = segment_features[:, :,
-					                   time_slice.start // hop_length:time_slice.stop // hop_length]
+					segment_features = segment_features[:, :, time_slice.start // hop_length:time_slice.stop // hop_length]
 					features.append(segment_features.squeeze(0))
 				else:
 					features.append(self.frontend(segment).squeeze(0))
@@ -255,7 +257,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			targets.append(encoded_transcripts)
 
 		# not batch mode
-		if not self.segmented:
+		if self.mode == AudioTextDataset.DEFAULT_MODE:
 			transcript, speaker, features = transcript[0], speaker[0], features[0]
 			targets = [target[0] for target in targets]
 		return [transcript, speaker, features] + targets
@@ -266,7 +268,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	# TODO проверить работу во всех режимах
 	def collate_fn(self, batch) -> typing.Tuple[
 		typing.List[dict], shaping.BS, shaping.BCT, shaping.B, shaping.BLY, shaping.B]:
-		if self.segmented:
+		if self.mode != AudioTextDataset.DEFAULT_MODE:
 			batch = list(zip(*batch))
 		meta_s, sample_s, sample_x, *sample_y = batch[0]
 		time_padding_multiple = [1, 1, self.time_padding_multiple] + [self.time_padding_multiple] * len(sample_y)
