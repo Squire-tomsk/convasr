@@ -51,9 +51,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			sample_rate: int,
 			mode: str = DEFAULT_MODE,
 			frontend = None,
-			max_audio_file_size_MB: float = None,
-			min_duration: float = None,
-			max_duration: float = None,
+			max_audio_file_size: float = None, #bytes
+			min_duration: float = 0.0,
+			max_duration: float = 24.0 * 3600, #24h
 			mono: bool = True,
 			audio_dtype: str = 'float32',
 			time_padding_multiple: int = 1,
@@ -69,7 +69,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.mode = mode
 		self.min_duration = min_duration
 		self.max_duration = max_duration
-		self.max_audio_file_size = max_audio_file_size_MB
+		self.max_audio_file_size = max_audio_file_size
 		self.text_pipelines = text_pipelines
 		self.frontend = frontend
 		self.sample_rate = sample_rate
@@ -103,7 +103,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		grouped_segments = []
 		transcripts_len = []
 		if self.mode == AudioTextDataset.DEFAULT_MODE:
-			groupped_transcripts = zip(range(len(segments)), segments)
+			groupped_transcripts = ((i, [t]) for i, t in enumerate(segments))
 		else:
 			groupped_transcripts = itertools.groupby(sorted(segments, key = transcripts.group_key), transcripts.group_key)
 
@@ -112,10 +112,16 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			if self.mode == AudioTextDataset.BATCHED_CHANNELS_MODE:
 				transcript = transcripts.join_transcript(transcript)
 
+			if exclude is not None:
+				allowed_audio_names = set(transcript.audio_name(t) for t in transcript if transcript.audio_name(t) not in exclude)
+			else:
+				allowed_audio_names = None
+
 			transcript = transcripts.prune(transcript,
-			                               allowed_audio_names = set(t['audio_name'] for t in transcript if t['audio_name'] not in exclude),
+			                               allowed_audio_names = allowed_audio_names,
 			                               duration = (min_duration, max_duration,),
-			                               max_audio_file_size = int(max_audio_file_size_MB * MB_SIZE))
+			                               max_audio_file_size = max_audio_file_size)
+			transcript = list(transcript)
 			for t in transcript:
 				t['example_id'] = AudioTextDataset.get_example_id(t)
 
@@ -191,7 +197,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			index += max(len(self.cumlen), 1)
 
 		transcript = []
-		for i in range(int(self.cumlen[index - 1]), int(self.cumlen[index])):
+		for i in range(int(self.cumlen[index - 1]) if index > 0 else 0, int(self.cumlen[index])):
 			ref = self.ref[i]
 			if self.mode == AudioTextDataset.DEFAULT_MODE:
 				speaker = torch.full((1, len(ref)), fill_value = self.speaker[i], dtype = torch.int64, device = 'cpu')

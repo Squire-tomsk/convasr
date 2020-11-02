@@ -198,7 +198,7 @@ def sort_key(t):
 
 
 def group_key(t):
-	return t.get('audio_path'), t.get('channel')
+	return t.get('audio_path')
 
 
 Interval = typing.NewType('Interval', typing.Tuple[typing.Union[float, int], typing.Union[float, int]])
@@ -213,7 +213,7 @@ def prune(
 	duration: typing.Optional[Interval] = None,
 	gap: typing.Optional[Interval] = None,
 	num_speakers: typing.Optional[Interval] = None,
-	allowed_audio_names: typing.Set[str, ...] = None,
+	allowed_audio_names: typing.Set[str] = None,
 	allowed_unk_count: typing.Optional[Interval] = None,
 	groups: typing.Set = None,
 	max_audio_file_size: typing.Optional[int] = None
@@ -232,7 +232,7 @@ def prune(
 	wer_check = lambda t: wer is None or t.get('wer') is None or wer[0] <= t['wer'] <= wer[1]
 	mer_check = lambda t: mer is None or t.get('mer') is None or mer[0] <= t['mer'] <= mer[1]
 	groups_check = lambda t: groups is None or t.get('group') is None or t['group'] in groups
-	name_check = lambda t: allowed_audio_names is None or t.get('audio_name') in allowed_audio_names
+	name_check = lambda t: allowed_audio_names is None or audio_name(t) in allowed_audio_names
 
 	prev = None
 	for t in transcript:
