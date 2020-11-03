@@ -6,6 +6,9 @@ import torch
 class _T(torch.Tensor):
 	pass
 
+class y(torch.Tensor):
+	pass
+
 class T(torch.Tensor):
 	pass
 

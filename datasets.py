@@ -15,8 +15,6 @@ import operator
 import typing
 import torch.nn.functional as F
 
-MB_SIZE = 1024 ** 2
-
 def worker_init_fn(worker_id, num_threads = 1):
 	utils.set_random_seed(worker_id)
 	utils.reset_cpu_threads(num_threads)
@@ -204,10 +202,10 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		for i in range(int(self.cumlen[index - 1]) if index > 0 else 0, int(self.cumlen[index])):
 			ref = self.ref[i]
 			if self.mode == AudioTextDataset.BATCHED_CHANNELS_MODE:
-				speaker = self.speaker[i: i + 1]
-				speaker = speaker[:, speaker[0] != transcripts.speaker_pad]
+				speaker = self.speaker[i]
+				speaker: shaping.y = speaker[speaker[0] != transcripts.speaker_pad]
 			else:
-				speaker = torch.full((1, len(ref)), fill_value = self.speaker[i], dtype = torch.int64, device = 'cpu')
+				speaker: shaping.y = torch.full((len(ref)), fill_value = self.speaker[i], dtype = torch.int64, device = 'cpu')
 			transcript.append(
 				dict(
 					audio_path = self.audio_path[index],
@@ -226,11 +224,12 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		transcript = self.unpack_transcript(index)
 
 		## signal shape here shaping.CT
+		signal: shaping.CT; sample_rate: int
 		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono,
 		                                       backend = self.audio_backend, duration = self.max_duration,
 		                                       dtype = self.audio_dtype)
 
-		speaker = [t.pop('speaker') for t in transcript]
+		speaker = [t.pop('speaker').unsqueeze(0) for t in transcript]
 
 		features = []
 		# slicing code in time and channel dimension
@@ -240,7 +239,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			                   1 + int(t['end'] * sample_rate) if t['end'] != transcripts.time_missing else signal.shape[1])
 			# signal shaping.CT -> segment shaping.1T
 			if self.mode == AudioTextDataset.DEFAULT_MODE:
-				segment = signal[None, channel, :]  # begin, end meta could be corrupted, thats why we dont use it here
+				segment: shaping._T = signal[None, channel, :]  # begin, end meta could be corrupted, thats why we dont use it here
 			else:
 				segment = signal[None, channel, time_slice]
 
@@ -275,7 +274,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 	def __len__(self):
 		return len(self.cumlen)
 
-	# TODO проверить работу во всех режимах
 	def collate_fn(self, batch) -> typing.Tuple[
 		typing.List[dict], shaping.BS, shaping.BCT, shaping.B, shaping.BLY, shaping.B]:
 		if self.mode != AudioTextDataset.DEFAULT_MODE:
@@ -326,9 +324,9 @@ class BucketingBatchSampler(torch.utils.data.Sampler):
 		rng.manual_seed(epoch)
 
 		def shuffle_and_split(g, batch_size):
-			required_samples_amount = math.ceil(len(g) / (batch_size * self.world_size)) * (
+			required_samples_count = math.ceil(len(g) / (batch_size * self.world_size)) * (
 						batch_size * self.world_size)
-			extension_indices = torch.randint(0, len(g), size = (required_samples_amount - len(g),), generator = rng,
+			extension_indices = torch.randint(0, len(g), size = (required_samples_count - len(g),), generator = rng,
 			                                  device = g.device)
 			g_extended = torch.cat([g, g[extension_indices]])
 			return g_extended[torch.randperm(len(g_extended), generator = rng)].reshape(-1, batch_size)

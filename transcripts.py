@@ -263,7 +263,7 @@ def join_transcript(transcript: Transcript, join_channels: bool = False):
 				torch.full((len(t['ref']) + 1,), fill_value = t['speaker'], dtype = torch.int64, device = 'cpu')
 					 .scatter_(0, torch.tensor(len(t['ref'])), speaker_missing) # space handling
 			)
-		speaker: shaping._T = torch.cat(speaker)[:-1].unsqueeze(0) # [:-1] to drop last space, because of len(t['ref'] + 1)
+		speaker: shaping.y = torch.cat(speaker)[:-1] # [:-1] to drop last space, because of len(t['ref'] + 1)
 		assert len(ref) == speaker.shape[-1]
 		if all(t['speaker'] == transcript[0]['speaker'] for t in transcript):
 			speaker_name = transcript[0].get('speaker_name', default_speaker_names[transcript[0]['speaker']])
