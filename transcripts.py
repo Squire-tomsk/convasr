@@ -87,7 +87,7 @@ def remap_speaker(transcript, speaker_perm):
 		t['speaker'], t['speaker_name'] = speaker_, speaker_names[speaker_]
 
 
-def collect_speaker_names(transcript, speaker_names = [], num_speakers = 1, set_speaker = False):
+def collect_speaker_names(transcript, speaker_names = [], num_speakers = 1, set_speaker_data = False):
 	#TODO: convert channel to 0+
 
 	if not transcript:
@@ -101,23 +101,28 @@ def collect_speaker_names(transcript, speaker_names = [], num_speakers = 1, set_
 	# assumes that either all have speaker | all have speaker_name
 	if not speaker_names:
 		if has_speaker:
-			speaker_names = {t['speaker'] : default_speaker_names[t['speaker']] for t in transcript}
-			assert speaker_missing not in speaker_names
+			speaker_names = {}
+			for t in transcript:
+				speaker_names[t['speaker']] = default_speaker_names[t['speaker']]
+				if set_speaker_data:
+					t['speaker_name'] = default_speaker_names[t['speaker']]
 			speaker_names[speaker_missing] = speaker_name_missing
 			speaker_names = [speaker_names.get(speaker, speaker_name_missing) for speaker in range(1 + max(speaker_names.values()))]
 		
 		elif has_speaker_names:
 			speaker_names = [speaker_name_missing] + sorted(set(t['speaker_name'] for t in transcript))
 			speaker_names_index = {speaker_name_missing : speaker_missing, **{speaker_name : i for i, speaker_name in enumerate(speaker_names)}}
+			if set_speaker_data:
+				for t in transcript:
+					t['speaker'] = speaker_names_index[t['speaker_name']]
 
 		else:
 			speaker_names_index = {default_channel_names[speaker] : speaker for speaker in [channel_missing] + list(range(num_speakers))}
 			speaker_names = [default_channel_names[channel] for channel in range(num_speakers)]
-
-	if set_speaker and (not has_speaker):
-		for t in transcript:
-			speaker_name = t.get('speaker_name') or default_channel_names[t.get('channel', channel_missing)]
-			t['speaker'] = speaker_names_index[speaker_name]
+			if set_speaker_data:
+				for t in transcript:
+					t['speaker_name'] = default_channel_names[t.get('channel', channel_missing)]
+					t['speaker'] = speaker_names_index[t['speaker_name']]
 
 	if num_speakers is not None and len(speaker_names) < 1 + num_speakers:
 		speaker_names.extend(f'speaker{speaker}' for speaker in range(len(speaker_names), 1 + num_speakers))
@@ -216,11 +221,12 @@ def prune(
 	num_speakers: typing.Optional[Interval] = None,
 	allowed_audio_names: typing.Set[str] = None,
 	allowed_unk_count: typing.Optional[Interval] = None,
-	groups: typing.Set = None,
 	max_audio_file_size: typing.Optional[int] = None
 ):
-	if max_audio_file_size is not None and os.path.getsize(transcript[0]['audio_path']) > max_audio_file_size:
-		yield from ()
+	audio_file_size_cache = dict()
+	get_size = lambda audio_path: audio_file_size_cache[audio_path] if audio_path in audio_file_size_cache else audio_file_size_cache.setdefault(audio_name, os.path.getsize(audio_path))
+
+	audio_size_check = lambda t: max_audio_file_size is None or get_size(t['audio_path']) <= max_audio_file_size
 	is_aligned = lambda w: (w.get('type') or w.get('error_tag')) == 'ok'
 	duration_check = lambda t: duration is None or duration[0] <= compute_duration(t) <= duration[1]
 	boundary_check = lambda t: ((not t.get('words')) or (not align_boundary_words) or
@@ -232,12 +238,11 @@ def prune(
 	cer_check = lambda t: cer is None or t.get('cer') is None or cer[0] <= t['cer'] <= cer[1]
 	wer_check = lambda t: wer is None or t.get('wer') is None or wer[0] <= t['wer'] <= wer[1]
 	mer_check = lambda t: mer is None or t.get('mer') is None or mer[0] <= t['mer'] <= mer[1]
-	groups_check = lambda t: groups is None or t.get('group') is None or t['group'] in groups
 	name_check = lambda t: allowed_audio_names is None or audio_name(t) in allowed_audio_names
 
 	prev = None
 	for t in transcript:
-		if groups_check(t) and unk_check(t) and duration_check(t) and cer_check(t) and wer_check(t) and mer_check(
+		if audio_size_check(t) and unk_check(t) and duration_check(t) and cer_check(t) and wer_check(t) and mer_check(
 			t) and boundary_check(t) and gap_check(t, prev) and speakers_check(t) and name_check(t):
 			yield t
 		prev = t
@@ -264,13 +269,8 @@ def join_transcript(transcript: Transcript, join_channels: bool = False):
 					 .scatter_(0, torch.tensor(len(t['ref'])), speaker_missing) # space handling
 			)
 		speaker: shaping.y = torch.cat(speaker)[:-1] # [:-1] to drop last space, because of len(t['ref'] + 1)
-		assert len(ref) == speaker.shape[-1]
-		if all(t['speaker'] == transcript[0]['speaker'] for t in transcript):
-			speaker_name = transcript[0].get('speaker_name', default_speaker_names[transcript[0]['speaker']])
-		else:
-			speaker_name = set(t.get('speaker_name', default_speaker_names[t['speaker']])  for t in transcript)
-			speaker_name = sorted(speaker_name)
-			speaker_name = ','.join(speaker_name)
+		assert len(ref) == len(speaker)
+		speaker_name = ','.join(collect_speaker_names(transcript))
 		duration = audio.compute_duration(transcript[0]['audio_path'])
 		joined_transcripts.append(dict(audio_path = audio_path,
 										ref = ref,

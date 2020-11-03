@@ -147,14 +147,14 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				)
 			] for i in range(len(meta))]
 			hyp_segments = [alternatives[0] for alternatives in
-			                generator.generate(tokenizer = text_pipeline.tokenizer,
-			                                   log_probs = log_probs,
-			                                   begin = begin,
-			                                   end = end,
-			                                   output_lengths = olen,
-			                                   time_stamps = ts,
-			                                   segment_text_key = 'hyp',
-				                               segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
+							generator.generate(tokenizer = text_pipeline.tokenizer,
+											   log_probs = log_probs,
+											   begin = begin,
+											   end = end,
+											   output_lengths = olen,
+											   time_stamps = ts,
+											   segment_text_key = 'hyp',
+											   segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
 			#TODO call text_pipeline.postprocess for hyp texts
 			hyp, ref = '\n'.join(transcripts.join(hyp = h) for h in hyp_segments).strip(), '\n'.join(transcripts.join(ref = r) for r in ref_segments).strip()
 			hyp, ref = map(text_pipeline.postprocess, [hyp, ref])
@@ -175,14 +175,14 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				aligned_ts: shaping.Bt = ts.gather(1, alignment)
 				## TODO call text_pipeline.postprocess for ref texts
 				ref_segments = [alternatives[0] for alternatives in
-				                generator.generate(tokenizer = text_pipeline.tokenizer,
-				                                   log_probs = torch.nn.functional.one_hot(y[:, 0, :], num_classes = log_probs.shape[1]).permute(0, 2, 1),
-				                                   begin = begin,
-				                                   end = end,
-				                                   output_lengths = ylen,
-				                                   time_stamps = aligned_ts,
-			                                       segment_text_key = 'ref',
-				                                   segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
+								generator.generate(tokenizer = text_pipeline.tokenizer,
+												   log_probs = torch.nn.functional.one_hot(y[:, 0, :], num_classes = log_probs.shape[1]).permute(0, 2, 1),
+												   begin = begin,
+												   end = end,
+												   output_lengths = ylen,
+												   time_stamps = aligned_ts,
+												   segment_text_key = 'ref',
+												   segment_extra_info = [dict(speaker = s, channel = c) for s,c in zip(speaker, channel)])]
 			oom_handler.reset()
 		except:
 			if oom_handler.try_recover(model.parameters()):
@@ -232,7 +232,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 				)
 			)
 
-		transcripts.collect_speaker_names(transcript, set_speaker = True, num_speakers = 2)
+		transcripts.collect_speaker_names(transcript, set_speaker_data = True, num_speakers = 2)
 
 		filtered_transcript = list(
 			transcripts.prune(
@@ -263,7 +263,7 @@ def main(args, ext_json = ['.json', '.json.gz']):
 			print(transcript_path)
 
 		if args.output_csv:
-		 	output_lines.extend(csv_sep.join([audio_path, h, str(meta[i]['begin']), str(meta[i]['end'])]) + '\n' for i, h in enumerate(hyp.split('\n')))
+			output_lines.extend(csv_sep.join([audio_path, h, str(meta[i]['begin']), str(meta[i]['end'])]) + '\n' for i, h in enumerate(hyp.split('\n')))
 
 		if args.logits:
 			logits_file_path = os.path.join(args.output_path, audio_name + '.pt')

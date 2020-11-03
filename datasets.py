@@ -48,10 +48,12 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			text_pipelines: typing.List[language_processing.ProcessingPipeline],
 			sample_rate: int,
 			mode: str = DEFAULT_MODE,
-			frontend = None,
+			frontend: typing.Optional[torch.nn.Module] = None,
+			speaker_names: typing.Optional[typing.List[str]] = None,
 			max_audio_file_size: typing.Optional[float] = None, #bytes
 			min_duration: typing.Optional[float] = None,
 			max_duration: typing.Optional[float] = None,
+			max_num_channels: int = 2,
 			mono: bool = True,
 			audio_dtype: str = 'float32',
 			time_padding_multiple: int = 1,
@@ -94,8 +96,9 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			t['begin'] = get_or_else(t, 'begin', transcripts.time_missing)
 			t['end'] = get_or_else(t, 'end', transcripts.time_missing)
 			t['channel'] = get_or_else(t, 'channel', transcripts.channel_missing) if not self.mono else transcripts.channel_missing
-			t['speaker'] = get_or_else(t, 'speaker', transcripts.speaker_missing)
-			t['speaker_name'] = get_or_else(t, 'speaker_name', transcripts.default_speaker_names[t['speaker']])
+
+		transcripts.collect_speaker_names(segments, speaker_names = speaker_names or [], num_speakers = max_num_channels, set_speaker_data = True)
+
 
 		buckets = []
 		grouped_segments = []
@@ -196,7 +199,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 	def unpack_transcript(self, index: int):
 		if index < 0:
-			index += max(len(self.cumlen), 1)
+			index += len(self.cumlen)
 
 		transcript = []
 		for i in range(int(self.cumlen[index - 1]) if index > 0 else 0, int(self.cumlen[index])):
