@@ -111,7 +111,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		for group_key, transcript in groupped_transcripts:
 			transcript = sorted(transcript, key = transcripts.sort_key)
 			if self.mode == AudioTextDataset.BATCHED_CHANNELS_MODE:
-				transcript = transcripts.join_transcript(transcript)
+				transcript = transcripts.join_transcript(transcript, self.mono)
 
 			if exclude is not None:
 				allowed_audio_names = set(transcripts.audio_name(t) for t in transcript if transcripts.audio_name(t) not in exclude)
