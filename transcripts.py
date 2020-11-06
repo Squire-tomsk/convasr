@@ -10,7 +10,6 @@ import itertools
 ref_missing = ''
 speaker_name_missing = ''
 speaker_missing = 0
-speaker_pad = -1
 channel_missing = -1
 time_missing = -1
 _er_missing = -1.0
@@ -107,7 +106,7 @@ def collect_speaker_names(transcript, speaker_names = [], num_speakers = 1, set_
 				if set_speaker_data:
 					t['speaker_name'] = default_speaker_names[t['speaker']]
 			speaker_names[speaker_missing] = speaker_name_missing
-			speaker_names = [speaker_names.get(speaker, speaker_name_missing) for speaker in range(1 + max(speaker_names.values()))]
+			speaker_names = [speaker_names.get(speaker, speaker_name_missing) for speaker in range(1 + max(speaker_names.keys()))]
 		
 		elif has_speaker_names:
 			speaker_names = [speaker_name_missing] + sorted(set(t['speaker_name'] for t in transcript))
@@ -261,15 +260,8 @@ def join_transcript(transcript: Transcript, join_channels: bool = False):
 		transcript = list(transcript)
 		audio_path = transcript[0]['audio_path']
 		assert all(t['audio_path'] == audio_path for t in transcript)
-		ref = ' '.join(t['ref'].strip() for t in transcript)
-		speaker = []
-		for t in transcript:
-			speaker.append(
-				torch.full((len(t['ref']) + 1,), fill_value = t['speaker'], dtype = torch.int64, device = 'cpu')
-					 .scatter_(0, torch.tensor(len(t['ref'])), speaker_missing) # space handling
-			)
-		speaker: shaping.y = torch.cat(speaker)[:-1] # [:-1] to drop last space, because of len(t['ref'] + 1)
-		assert len(ref) == len(speaker)
+		ref = ';'.join(t['ref'].strip() for t in transcript)
+		speaker = [t['speaker'] for t in transcript]
 		speaker_name = ','.join(collect_speaker_names(transcript))
 		duration = audio.compute_duration(transcript[0]['audio_path'])
 		joined_transcripts.append(dict(audio_path = audio_path,

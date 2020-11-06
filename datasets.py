@@ -103,6 +103,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		buckets = []
 		grouped_segments = []
 		transcripts_len = []
+		speakers_len = []
 		if self.mode == AudioTextDataset.DEFAULT_MODE:
 			groupped_transcripts = ((i, [t]) for i, t in enumerate(segments))
 		else:
@@ -133,9 +134,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			bucket = bucket_fn(transcript)
 			for t in transcript:
 				t['bucket'] = bucket
+				speakers_len.append(len(t['speaker']) if (isinstance(t['speaker'], list)) else 1)
 			buckets.append(bucket)
 			grouped_segments.extend(transcript)
 			transcripts_len.append(len(transcript))
+
 
 		_print('Dataset construction time: ', time.time() - tic)
 		tic = time.time()
@@ -148,12 +151,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.channel = torch.tensor([t['channel'] for t in grouped_segments], dtype = torch.int8, device = 'cpu')
 		self.example_id = utils.TensorBackedStringArray([t['example_id'] for t in grouped_segments], encoding = string_array_encoding)
 		if self.mode == AudioTextDataset.BATCHED_CHANNELS_MODE:
-			max_len = max(t['speaker'].shape[1] for t in grouped_segments)
-			padded_speakers = [F.pad(t['speaker'], [0, 0, 0, max_len - t['speaker'].shape[1]], value = transcripts.speaker_pad) for t in transcript]
-			self.speaker = torch.cat(padded_speakers)
+			self.speaker = torch.tensor([speaker for t in grouped_segments for speaker in t['speaker']], dtype = torch.int64, device = 'cpu')
 		else:
 			self.speaker = torch.tensor([t['speaker'] for t in grouped_segments], dtype = torch.int64, device = 'cpu')
-		self.cumlen = torch.tensor(transcripts_len, dtype = torch.int16, device = 'cpu').cumsum(dim = 0, dtype = torch.int64)
+		self.speaker_len = torch.tensor(speakers_len, dtype = torch.int16, device = 'cpu')
+		self.transcript_cumlen = torch.tensor(transcripts_len, dtype = torch.int16, device = 'cpu').cumsum(dim = 0, dtype = torch.int64)
 		if pop_meta:
 			self.meta = {}
 		else:
@@ -162,16 +164,17 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 	def state_dict(self) -> dict:
 		return {
-			'bucket'       : self.bucket,
-			'audio_path'   : self.audio_path,
-			'ref'          : self.ref,
-			'begin'        : self.begin,
-			'end'          : self.end,
-			'channel'      : self.channel,
-			'speaker'      : self.speaker,
-			'example_id'   : self.example_id,
-			'meta'         : self.meta,
-			'cumlen'       : self.cumlen
+			'bucket'            : self.bucket,
+			'audio_path'        : self.audio_path,
+			'ref'               : self.ref,
+			'begin'             : self.begin,
+			'end'               : self.end,
+			'channel'           : self.channel,
+			'speaker'           : self.speaker,
+			'example_id'        : self.example_id,
+			'meta'              : self.meta,
+			'speaker_len'    : self.speaker_len,
+			'transcript_cumlen' : self.transcript_cumlen
 		}
 
 	def load_state_dict(self, state_dict: dict):
@@ -184,7 +187,8 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		self.speaker = state_dict['speaker']
 		self.example_id = state_dict['example_id']
 		self.meta = state_dict['meta']
-		self.cumlen = state_dict['cumlen']
+		self.speaker_len = state_dict['speaker_len']
+		self.transcript_cumlen = state_dict['transcript_cumlen']
 
 	def pop_meta(self):
 		meta = self.meta
@@ -199,16 +203,12 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 	def unpack_transcript(self, index: int):
 		if index < 0:
-			index += len(self.cumlen)
+			index += len(self.transcript_cumlen)
 
 		transcript = []
-		for i in range(int(self.cumlen[index - 1]) if index > 0 else 0, int(self.cumlen[index])):
+		for i in range(int(self.transcript_cumlen[index - 1]) if index > 0 else 0, int(self.transcript_cumlen[index])):
 			ref = self.ref[i]
-			if self.mode == AudioTextDataset.BATCHED_CHANNELS_MODE:
-				speaker = self.speaker[i]
-				speaker: shaping.y = speaker[speaker[0] != transcripts.speaker_pad]
-			else:
-				speaker: shaping.y = torch.full((len(ref)), fill_value = self.speaker[i], dtype = torch.int64, device = 'cpu')
+			speaker = self.speaker[i: i + self.speaker_len[i]]
 			transcript.append(
 				dict(
 					audio_path = self.audio_path[index],
@@ -231,8 +231,6 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono,
 		                                       backend = self.audio_backend, duration = self.max_duration,
 		                                       dtype = self.audio_dtype)
-
-		speaker = [t.pop('speaker').unsqueeze(0) for t in transcript]
 
 		features = []
 		# slicing code in time and channel dimension
@@ -258,24 +256,43 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			else:
 				features.append(segment)
 
-		# ref processing code
+		# speaker alignment and ref processing code
 		targets = []
+		speakers = []
 		for pipeline in self.text_pipelines:
-			encoded_transcripts = []
+			encoded_refs = []
+			aligned_speakers = []
 			for t in transcript:
-				processed = pipeline.preprocess(t['ref'])
-				tokens = torch.tensor(pipeline.encode([processed])[0], dtype = torch.long, device = 'cpu')
-				encoded_transcripts.append(tokens)
-			targets.append(encoded_transcripts)
+				tokens = []
+				speaker_labels = []
+				ref_by_speaker = t['ref'].split(';')
+				ref_by_speaker = [ref_by_speaker[0]] + [' ' + ref for ref in ref_by_speaker[1:]]
+				assert len(ref_by_speaker) == len(t['speaker'])
+				for speaker_ref, speaker_label in zip(ref_by_speaker, t['speaker']):
+					processed = pipeline.preprocess(speaker_ref)
+					speaker_tokens = torch.tensor(pipeline.encode([processed])[0], dtype = torch.long, device = 'cpu')
+					tokens.append(speaker_tokens)
+					speaker_labels.append(torch.full((len(speaker_tokens),), fill_value = speaker_label, dtype = torch.int64, device = 'cpu'))
+				encoded_refs.append(torch.cat(tokens))
+				aligned_speakers.append(torch.cat(speaker_labels))
+			targets.append(encoded_refs)
+			speakers.append(aligned_speakers)
 
+		# replace special symbol ";" from ref
+		for t in transcript:
+			t['ref'] = t['ref'].replace(';', ' ')
+
+		# speaker generated for all text pipelines, but for backward compatibility, only first pipeline speakers will be used
+		speaker = speakers[0]
 		# not batch mode
 		if self.mode == AudioTextDataset.DEFAULT_MODE:
 			transcript, speaker, features = transcript[0], speaker[0], features[0]
 			targets = [target[0] for target in targets]
+
 		return [transcript, speaker, features] + targets
 
 	def __len__(self):
-		return len(self.cumlen)
+		return len(self.transcript_cumlen)
 
 	def collate_fn(self, batch) -> typing.Tuple[
 		typing.List[dict], shaping.BS, shaping.BCT, shaping.B, shaping.BLY, shaping.B]:
