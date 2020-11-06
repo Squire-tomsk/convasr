@@ -143,19 +143,19 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		_print('Dataset construction time: ', time.time() - tic)
 		tic = time.time()
 
-		self.bucket = torch.tensor(buckets, dtype = torch.short, device = 'cpu')
+		self.bucket = torch.tensor(buckets, dtype = torch.short)
 		self.audio_path = utils.TensorBackedStringArray([t['audio_path'] for t in grouped_segments], encoding = string_array_encoding)
 		self.ref = utils.TensorBackedStringArray([t['ref'] for t in grouped_segments], encoding = string_array_encoding)
-		self.begin = torch.tensor([t['begin'] for t in grouped_segments], dtype = torch.float64, device = 'cpu')
-		self.end = torch.tensor([t['end'] for t in grouped_segments], dtype = torch.float64, device = 'cpu')
-		self.channel = torch.tensor([t['channel'] for t in grouped_segments], dtype = torch.int8, device = 'cpu')
+		self.begin = torch.tensor([t['begin'] for t in grouped_segments], dtype = torch.float64)
+		self.end = torch.tensor([t['end'] for t in grouped_segments], dtype = torch.float64)
+		self.channel = torch.tensor([t['channel'] for t in grouped_segments], dtype = torch.int8)
 		self.example_id = utils.TensorBackedStringArray([t['example_id'] for t in grouped_segments], encoding = string_array_encoding)
 		if self.mode == AudioTextDataset.BATCHED_CHANNELS_MODE:
-			self.speaker = torch.tensor([speaker for t in grouped_segments for speaker in t['speaker']], dtype = torch.int64, device = 'cpu')
+			self.speaker = torch.tensor([speaker for t in grouped_segments for speaker in t['speaker']], dtype = torch.int64)
 		else:
-			self.speaker = torch.tensor([t['speaker'] for t in grouped_segments], dtype = torch.int64, device = 'cpu')
-		self.speaker_len = torch.tensor(speakers_len, dtype = torch.int16, device = 'cpu')
-		self.transcript_cumlen = torch.tensor(transcripts_len, dtype = torch.int16, device = 'cpu').cumsum(dim = 0, dtype = torch.int64)
+			self.speaker = torch.tensor([t['speaker'] for t in grouped_segments], dtype = torch.int64)
+		self.speaker_len = torch.tensor(speakers_len, dtype = torch.int16)
+		self.transcript_cumlen = torch.tensor(transcripts_len, dtype = torch.int16).cumsum(dim = 0, dtype = torch.int64)
 		if pop_meta:
 			self.meta = {}
 		else:
@@ -260,27 +260,13 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		targets = []
 		speakers = []
 		for pipeline in self.text_pipelines:
-			encoded_refs = []
-			aligned_speakers = []
-			for t in transcript:
-				tokens = []
-				speaker_labels = []
-				ref_by_speaker = t['ref'].split(';')
-				ref_by_speaker = [ref_by_speaker[0]] + [' ' + ref for ref in ref_by_speaker[1:]]
-				assert len(ref_by_speaker) == len(t['speaker'])
-				for speaker_ref, speaker_label in zip(ref_by_speaker, t['speaker']):
-					processed = pipeline.preprocess(speaker_ref)
-					speaker_tokens = torch.tensor(pipeline.encode([processed])[0], dtype = torch.long, device = 'cpu')
-					tokens.append(speaker_tokens)
-					speaker_labels.append(torch.full((len(speaker_tokens),), fill_value = speaker_label, dtype = torch.int64, device = 'cpu'))
-				encoded_refs.append(torch.cat(tokens))
-				aligned_speakers.append(torch.cat(speaker_labels))
+			encoded_refs, aligned_speakers = AudioTextDataset.encode_transcript(transcript, pipeline)
 			targets.append(encoded_refs)
 			speakers.append(aligned_speakers)
 
-		# replace special symbol ";" from ref
+		# replace speaker separators from ref
 		for t in transcript:
-			t['ref'] = t['ref'].replace(';', ' ')
+			t['ref'] = t['ref'].replace(transcripts.speaker_separator, ' ')
 
 		# speaker generated for all text pipelines, but for backward compatibility, only first pipeline speakers will be used
 		speaker = speakers[0]
@@ -307,10 +293,10 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 		meta: typing.List[dict] = [b[0] for b in batch]
 		x: shaping.BCT = torch.zeros(len(batch), len(sample_x), xmax_len, dtype = sample_x.dtype)
-		y: shaping.BLY = torch.zeros(len(batch), len(sample_y), max(ymax_len), dtype = torch.long)
+		y: shaping.BLY = torch.zeros(len(batch), len(sample_y), max(ymax_len), dtype = torch.int64)
 		s: shaping.BS = torch.full((len(batch), smax_len), transcripts.speaker_missing, dtype = torch.int64)
 		xlen: shaping.B = torch.zeros(len(batch), dtype = torch.float32)
-		ylen: shaping.B = torch.zeros(len(batch), len(sample_y), dtype = torch.long)
+		ylen: shaping.B = torch.zeros(len(batch), len(sample_y), dtype = torch.int64)
 
 		for k, (meta_s, sample_s, sample_x, *sample_y) in enumerate(batch):
 			xlen[k] = sample_x.shape[-1] / x.shape[-1] if x.shape[-1] > 0 else 1.0
@@ -322,6 +308,28 @@ class AudioTextDataset(torch.utils.data.Dataset):
 
 		return (meta, s, x, xlen, y, ylen)
 
+	@staticmethod
+	def encode_transcript(transcript, pipeline):
+		'''
+		Method encode transcript refs and provide speaker vectors aligned with this refs
+		'''
+		encoded_refs = []
+		aligned_speakers = []
+		for t in transcript:
+			tokens = []
+			speaker_labels = []
+			ref_by_speaker = t['ref'].split(transcripts.speaker_separator)
+			ref_by_speaker = [ref_by_speaker[0]] + [' ' + ref for ref in ref_by_speaker[1:]]
+			assert len(ref_by_speaker) == len(t['speaker'])
+			for speaker_ref, speaker_label in zip(ref_by_speaker, t['speaker']):
+				processed = pipeline.preprocess(speaker_ref)
+				speaker_tokens = torch.tensor(pipeline.encode([processed])[0], dtype = torch.int64)
+				tokens.append(speaker_tokens)
+				speaker_labels.append(
+					torch.full((len(speaker_tokens),), fill_value = speaker_label, dtype = torch.int64))
+			encoded_refs.append(torch.cat(tokens))
+			aligned_speakers.append(torch.cat(speaker_labels))
+		return encoded_refs, aligned_speakers
 
 class BucketingBatchSampler(torch.utils.data.Sampler):
 	def __init__(self, dataset, batch_size = 1, world_size = 1):

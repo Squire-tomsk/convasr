@@ -10,6 +10,7 @@ import itertools
 ref_missing = ''
 speaker_name_missing = ''
 speaker_missing = 0
+speaker_separator = ';'
 channel_missing = -1
 time_missing = -1
 _er_missing = -1.0
@@ -260,7 +261,7 @@ def join_transcript(transcript: Transcript, join_channels: bool = False):
 		transcript = list(transcript)
 		audio_path = transcript[0]['audio_path']
 		assert all(t['audio_path'] == audio_path for t in transcript)
-		ref = ';'.join(t['ref'].strip() for t in transcript)
+		ref = speaker_separator.join(t['ref'].strip() for t in transcript)
 		speaker = [t['speaker'] for t in transcript]
 		speaker_name = ','.join(collect_speaker_names(transcript))
 		duration = audio.compute_duration(transcript[0]['audio_path'])
