@@ -284,6 +284,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		typing.List[dict], shaping.BS, shaping.BCT, shaping.B, shaping.BLY, shaping.B]:
 		if self.mode != AudioTextDataset.DEFAULT_MODE:
 			batch = list(zip(*batch))
+		#TODO replace meta_s to example_ids
 		meta_s, sample_s, sample_x, *sample_y = batch[0]
 		time_padding_multiple = [1, 1, self.time_padding_multiple] + [self.time_padding_multiple] * len(sample_y)
 		smax_len, xmax_len, *ymax_len = [

@@ -227,14 +227,14 @@ def prune(
 	get_size = lambda audio_path: audio_file_size_cache[audio_path] if audio_path in audio_file_size_cache else audio_file_size_cache.setdefault(audio_name, os.path.getsize(audio_path))
 
 	audio_size_check = lambda t: max_audio_file_size is None or get_size(t['audio_path']) <= max_audio_file_size
+	# TODO is_aligned check and refactor
 	is_aligned = lambda w: (w.get('type') or w.get('error_tag')) == 'ok'
 	duration_check = lambda t: duration is None or duration[0] <= compute_duration(t) <= duration[1]
 	boundary_check = lambda t: ((not t.get('words')) or (not align_boundary_words) or
 								(is_aligned(t['words'][0]) and is_aligned(t['words'][-1])))
 	gap_check = lambda t, prev: prev is None or gap is None or gap[0] <= t['begin'] - prev['end'] <= gap[1]
 	unk_check = lambda t: allowed_unk_count is None or allowed_unk_count[0] <= t.get('ref', '').count('*') <= allowed_unk_count[1]
-	speakers_check = lambda t: num_speakers is None or num_speakers[0] <= (t.get('speaker') or ''
-																			).count(',') + 1 <= num_speakers[1]
+	speakers_check = lambda t: num_speakers is None or num_speakers[0] <= (t.get('speaker_name') or '').count(',') + 1 <= num_speakers[1]
 	cer_check = lambda t: cer is None or t.get('cer') is None or cer[0] <= t['cer'] <= cer[1]
 	wer_check = lambda t: wer is None or t.get('wer') is None or wer[0] <= t['wer'] <= wer[1]
 	mer_check = lambda t: mer is None or t.get('mer') is None or mer[0] <= t['mer'] <= mer[1]

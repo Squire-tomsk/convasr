@@ -6,7 +6,7 @@ import torch
 class _T(torch.Tensor):
 	pass
 
-class y(torch.Tensor):
+class BY(torch.Tensor):
 	pass
 
 class T(torch.Tensor):
