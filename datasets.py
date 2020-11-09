@@ -211,7 +211,7 @@ class AudioTextDataset(torch.utils.data.Dataset):
 			speaker = self.speaker[i: i + self.speaker_len[i]]
 			transcript.append(
 				dict(
-					audio_path = self.audio_path[index],
+					audio_path = self.audio_path[i],
 					ref = ref,
 					begin = float(self.begin[i]),
 					end = float(self.end[i]),
@@ -223,12 +223,11 @@ class AudioTextDataset(torch.utils.data.Dataset):
 		return transcript
 
 	def __getitem__(self, index):
-		audio_path = self.audio_path[index]
 		transcript = self.unpack_transcript(index)
 
 		## signal shape here shaping.CT
 		signal: shaping.CT; sample_rate: int
-		signal, sample_rate = audio.read_audio(audio_path, sample_rate = self.sample_rate, mono = self.mono,
+		signal, sample_rate = audio.read_audio(transcript[0]['audio_path'], sample_rate = self.sample_rate, mono = self.mono,
 		                                       backend = self.audio_backend, duration = self.max_duration,
 		                                       dtype = self.audio_dtype)
 
