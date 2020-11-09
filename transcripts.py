@@ -149,7 +149,7 @@ def segment_by_time(transcript, max_segment_seconds, break_on_speaker_change = T
 def take_between(transcript, ind_last_taken, t, first, last, sort_by_time = True, soft = True, set_speaker = False):
 	if sort_by_time:
 		lt = lambda a, b: a['end'] < b['begin']
-		gt = lambda a, b: a['begin'] > b['begin']
+		gt = lambda a, b: a['end'] > b['begin']
 	else:
 		lt = lambda a, b: sort_key(a) < sort_key(b)
 		gt = lambda a, b: sort_key(a) > sort_key(b)
